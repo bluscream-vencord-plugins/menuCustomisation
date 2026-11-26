@@ -147,7 +147,10 @@ function ItemForm({ row, layout, original, targets, save }: ItemFormProps) {
                 }}
             />
             <Span weight="medium" size="md">Hidden</Span>
-            <Switch checked={false} onChange={hide => hide && save({ ...layout, hidden: [...layout.hidden, key] })} />
+            <Switch
+                checked={layout.hidden.includes(key)}
+                onChange={hide => save({ ...layout, hidden: hide ? [...layout.hidden, key] : layout.hidden.filter(k => k !== key) })}
+            />
             <Span weight="medium" size="md">Put into</Span>
             <Select
                 options={[{ label: "Where it was", value: KEEP }, ...targets.filter(t => t.value !== key)]}
@@ -172,6 +175,7 @@ function badges(row: Row, layout: MenuLayout) {
     const key = row.node.path ?? "";
     return [
         row.node.synthetic ? "New submenu" : row.node.type,
+        layout.hidden.includes(key) && "Hidden",
         layout.renames[key] && "Renamed",
         layout.moves.some(m => m.item === key) && "Moved"
     ].filter(Boolean).join(" · ");
@@ -189,10 +193,10 @@ function LayoutEditor({ initialNavId }: { initialNavId?: string; }) {
     if (!navIds.length) return <Paragraph>No menus seen yet. Open a few right-click menus, then come back.</Paragraph>;
 
     const layout = layouts[navId] ?? emptyLayout();
-    const save = (next: MenuLayout) => settings.store.layouts = { ...layouts, [navId]: next };
+    const save = (next: MenuLayout) => settings.store.layouts = lodash.cloneDeep({ ...layouts, [navId]: next });
     const original = recorded[navId] ?? [];
     const known = recordedPaths(original);
-    const preview: MenuNode[] = applyLayout(lodash.cloneDeep(original), layout);
+    const preview: MenuNode[] = applyLayout(lodash.cloneDeep(original), { ...layout, hidden: [] });
     const rows = toRows(preview);
     const targets = [
         { label: "Top level", value: "" },
@@ -320,7 +324,7 @@ function LayoutEditor({ initialNavId }: { initialNavId?: string; }) {
             <Flex className={Margins.top20} gap="0.5em">
                 <Button variant="dangerPrimary" onClick={() => {
                     const { [navId]: _, ...rest } = layouts;
-                    settings.store.layouts = rest;
+                    settings.store.layouts = lodash.cloneDeep(rest);
                 }}>Reset This Menu</Button>
                 <Button variant="secondary" onClick={() => forgetRecording(navId)}>Forget Seen Items</Button>
             </Flex>
