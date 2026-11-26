@@ -14,6 +14,9 @@ import { PATTERNS } from "./patterns";
 
 export const logger = new Logger("MenuCustomisation");
 
+const SEP = PATTERNS.pathSeparator;
+const WILD = PATTERNS.wildcard;
+
 export interface Move {
     item: string;
     into: string;
@@ -30,6 +33,11 @@ export interface MenuLayout {
 
 export const emptyLayout = (): MenuLayout => ({ hidden: [], renames: {}, submenus: {}, moves: [] });
 
+export const normaliseLayout = (layout?: Partial<MenuLayout>): MenuLayout => ({ ...emptyLayout(), ...layout });
+
+export const isEmptyLayout = (layout: MenuLayout) =>
+    !layout.hidden.length && !layout.moves.length && !Object.keys(layout.renames).length && !Object.keys(layout.submenus).length;
+
 export type NodeKind = "group" | "submenu" | "item" | "opaque";
 
 interface ItemProps {
@@ -37,6 +45,7 @@ interface ItemProps {
     label?: ReactNode;
     children?: ReactNode;
     render?: unknown;
+    action?: unknown;
 }
 
 type MenuElement = ReactElement<ItemProps>;
@@ -50,15 +59,20 @@ export interface MenuNode {
     children?: MenuNode[];
     synthetic?: boolean;
     renamed?: boolean;
+    emptied?: boolean;
     el?: MenuElement;
 }
 
 export type RecordedNode = Omit<MenuNode, "el" | "children"> & { children?: RecordedNode[]; };
 
+function isElement(node: unknown): node is MenuElement {
+    return typeof node === "object" && node !== null && "type" in node && "props" in node;
+}
+
 function textOf(node: ReactNode): string {
     if (typeof node === "string" || typeof node === "number") return String(node);
     if (Array.isArray(node)) return node.map(textOf).join("");
-    if (React.isValidElement<{ children?: ReactNode; }>(node)) return textOf(node.props.children);
+    if (isElement(node)) return textOf(node.props.children);
     return "";
 }
 
@@ -74,11 +88,25 @@ function typeName(el: MenuElement): string {
 
 function flatten(children: ReactNode, out: MenuElement[] = []): MenuElement[] {
     if (Array.isArray(children)) children.forEach(c => flatten(c, out));
-    else if (React.isValidElement<ItemProps>(children)) {
+    else if (isElement(children)) {
         if (children.type === React.Fragment) flatten(children.props.children, out);
         else out.push(children);
     }
     return out;
+}
+
+export const joinPath = (parent: string, id: string) => parent ? parent + SEP + id : id;
+export const parentOf = (path: string) => path.includes(SEP) ? path.slice(0, path.lastIndexOf(SEP)) : "";
+export const lastSegment = (key: string) => key.slice(key.lastIndexOf(SEP) + 1);
+export const displayPath = (path: string) => path.split(SEP).join(PATTERNS.pathDisplaySeparator);
+
+export function keyMatches(key: string, node: { id?: string; path?: string; }): boolean {
+    if (!node.id) return false;
+    if (key === node.path) return true;
+    const id = lastSegment(key);
+    if (id === node.id) return true;
+    if (id.endsWith(WILD) && node.id.startsWith(id.slice(0, -1))) return true;
+    return node.id.endsWith(WILD) && id.startsWith(node.id.slice(0, -1));
 }
 
 export function parse(children: ReactNode, parentPath = ""): MenuNode[] {
@@ -87,7 +115,7 @@ export function parse(children: ReactNode, parentPath = ""): MenuNode[] {
         if (type === "group") return { kind: "group", type, label: "", el, children: parse(el.props.children, parentPath) };
         const { id } = el.props;
         if (!id) return { kind: "opaque", type, label: textOf(el.props.label), el };
-        const path = parentPath ? parentPath + PATTERNS.pathSeparator + id : id;
+        const path = joinPath(parentPath, id);
         const label = textOf(el.props.label) || id;
         if (type === "submenu") return { kind: "submenu", type, label, id, path, el, children: parse(el.props.children, path) };
         return { kind: "item", type, label, id, path, el };
@@ -111,42 +139,47 @@ function index(nodes: MenuNode[], container: string, map: Map<string, Entry>) {
     return map;
 }
 
-const lastSegment = (key: string) => key.slice(key.lastIndexOf(PATTERNS.pathSeparator) + 1);
-
-function resolve(map: Map<string, Entry>, key: string): Entry | undefined {
-    const exact = map.get(key);
-    if (exact) return exact;
-    const id = lastSegment(key);
-    const prefix = id.endsWith(PATTERNS.wildcard) ? id.slice(0, -1) : null;
-    for (const entry of map.values()) {
-        const nodeId = entry.node.id ?? "";
-        if (prefix !== null ? nodeId.startsWith(prefix) : nodeId === id) return entry;
-    }
-}
-
 function resolveAll(map: Map<string, Entry>, key: string): Entry[] {
-    if (!key.endsWith(PATTERNS.wildcard)) {
-        const entry = resolve(map, key);
-        return entry ? [entry] : [];
-    }
-    const prefix = lastSegment(key).slice(0, -1);
-    return [...map.values()].filter(e => e.node.id?.startsWith(prefix));
+    const exact = map.get(key);
+    if (exact) return [exact];
+    const all = [...map.values()].filter(e => keyMatches(key, e.node));
+    return key.endsWith(WILD) ? all : all.slice(0, 1);
 }
+
+const resolve = (map: Map<string, Entry>, key: string) => resolveAll(map, key)[0];
 
 function detach(entry: Entry) {
     const i = entry.parent.indexOf(entry.node);
     if (i !== -1) entry.parent.splice(i, 1);
 }
 
-/** Applies a layout to a parsed menu in place and returns it. Used for real menus and for the editor's preview. */
+function forgetSubtree(map: Map<string, Entry>, path: string) {
+    for (const key of [...map.keys()]) if (key === path || key.startsWith(path + SEP)) map.delete(key);
+}
+
+function containsList(node: MenuNode, list: MenuNode[]): boolean {
+    return !!node.children && (node.children === list || node.children.some(c => containsList(c, list)));
+}
+
+function levelHas(list: MenuNode[], id: string, except: MenuNode): boolean {
+    return list.some(n => n.kind === "group" ? levelHas(n.children ?? [], id, except) : n !== except && n.id === id);
+}
+
+const hasLeaves = (nodes: MenuNode[]): boolean => nodes.some(n => n.kind !== "group" || hasLeaves(n.children ?? []));
+
 export function applyLayout(root: MenuNode[], layout: MenuLayout): MenuNode[] {
     const map = index(root, "", new Map());
 
-    for (const key of layout.hidden) resolveAll(map, key).forEach(e => { detach(e); map.delete(e.node.path ?? ""); });
+    for (const key of layout.hidden) {
+        for (const entry of resolveAll(map, key)) {
+            detach(entry);
+            forgetSubtree(map, entry.node.path ?? "");
+        }
+    }
 
     const containerOf = (into: string, member: Entry): { list: MenuNode[]; container: string; } | null => {
         if (!into) return { list: root, container: "" };
-        const existing = map.get(into) ?? resolve(map, into);
+        const existing = resolve(map, into);
         if (existing) return existing.node.children ? { list: existing.node.children, container: existing.node.path ?? into } : null;
         const submenu = layout.submenus[into];
         if (!submenu) return null;
@@ -157,33 +190,35 @@ export function applyLayout(root: MenuNode[], layout: MenuLayout): MenuNode[] {
     };
 
     for (const move of layout.moves) {
-        const entry = resolve(map, move.item);
-        if (!entry || entry.node.path === move.into) continue;
-        const target = containerOf(move.into, entry);
-        if (!target || target.list.some(n => n !== entry.node && n.id && n.id === entry.node.id)) continue;
-        detach(entry);
-        const anchor = move.anchor ? resolve(map, move.anchor) : undefined;
-        if (anchor && anchor.container === target.container && anchor.node !== entry.node) {
-            const i = anchor.parent.indexOf(anchor.node);
-            anchor.parent.splice(move.before ? i : i + 1, 0, entry.node);
-            entry.parent = anchor.parent;
-        } else {
-            target.list.push(entry.node);
-            entry.parent = target.list;
+        for (const entry of resolveAll(map, move.item)) {
+            const target = containerOf(move.into, entry);
+            if (!target || containsList(entry.node, target.list)) continue;
+            if (entry.node.id && levelHas(target.list, entry.node.id, entry.node)) continue;
+            detach(entry);
+            const anchor = move.anchor ? resolve(map, move.anchor) : undefined;
+            if (anchor && anchor.container === target.container && anchor.node !== entry.node) {
+                const i = anchor.parent.indexOf(anchor.node);
+                anchor.parent.splice(move.before ? i : i + 1, 0, entry.node);
+                entry.parent = anchor.parent;
+            } else {
+                target.list.push(entry.node);
+                entry.parent = target.list;
+            }
+            entry.container = target.container;
         }
-        entry.container = target.container;
     }
 
     for (const [key, label] of Object.entries(layout.renames)) {
-        const entry = resolve(map, key);
-        if (entry && label) Object.assign(entry.node, { label, renamed: true });
+        if (label) resolveAll(map, key).forEach(e => Object.assign(e.node, { label, renamed: true }));
     }
 
     const prune = (nodes: MenuNode[]) => {
         for (let i = nodes.length - 1; i >= 0; i--) {
             const node = nodes[i];
             if (node.children) prune(node.children);
-            if (node.type === "submenu" && !node.children?.length) nodes.splice(i, 1);
+            if (node.type !== "submenu" || hasLeaves(node.children ?? [])) continue;
+            if (node.el?.props.action) Object.assign(node, { kind: "item", type: "item", children: undefined, emptied: true });
+            else nodes.splice(i, 1);
         }
     };
     prune(root);
@@ -196,53 +231,101 @@ function toElements(nodes: MenuNode[]): ReactNode[] {
         if (node.synthetic) return React.createElement(Menu.MenuItem, { key: node.id, id: node.id ?? "", label: node.label }, children);
         const { el } = node;
         if (!el) return null;
-        if (children) el.props.children = children;
-        if (node.renamed) el.props.label = node.label;
-        return el;
+        const props: ItemProps = { ...el.props };
+        if (children) props.children = children;
+        else if (node.emptied) delete props.children;
+        if (node.renamed) props.label = node.label;
+        return { ...el, props };
     });
 }
 
-const toRecorded = (nodes: MenuNode[]): RecordedNode[] =>
-    nodes.map(({ el, children, ...rest }) => children ? { ...rest, children: toRecorded(children) } : rest);
+function normaliseId(id: string) {
+    const match = PATTERNS.dynamicId.exec(id);
+    return match ? { id: id.slice(0, match.index) + WILD, dynamic: true } : { id, dynamic: false };
+}
 
-const signature = (nodes: RecordedNode[]): string =>
+interface Budget { left: number; }
+
+function toRecorded(nodes: Array<MenuNode | RecordedNode>, parentPath: string, budget: Budget, seen = new Set<string>(), count = { n: 0 }): RecordedNode[] {
+    const out: RecordedNode[] = [];
+    for (const node of nodes) {
+        if (budget.left <= 0 || count.n >= PATTERNS.maxChildrenPerLevel) break;
+        if (node.kind === "group") {
+            budget.left--;
+            const children = toRecorded(node.children ?? [], parentPath, budget, seen, count);
+            if (children.length) out.push({ kind: "group", type: "group", label: "", children });
+            continue;
+        }
+        if (!node.id) {
+            budget.left--;
+            count.n++;
+            out.push({ kind: node.kind, type: node.type, label: node.label });
+            continue;
+        }
+        const { id, dynamic } = normaliseId(node.id);
+        const path = joinPath(parentPath, id);
+        if (seen.has(path)) continue;
+        seen.add(path);
+        budget.left--;
+        count.n++;
+        const rec: RecordedNode = { kind: node.kind, type: node.type, label: dynamic ? id : node.label, id, path };
+        if (node.children) rec.children = toRecorded(node.children, path, budget);
+        out.push(rec);
+    }
+    return out;
+}
+
+const capped = (nodes: Array<MenuNode | RecordedNode>) => toRecorded(nodes, "", { left: PATTERNS.maxNodesPerMenu });
+
+const signature = (nodes: MenuNode[]): string =>
     nodes.map(n => (n.id ?? n.kind) + (n.children ? `[${signature(n.children)}]` : "")).join(",");
 
-function pathsOf(nodes: RecordedNode[], into: Set<string> = new Set()) {
+function byPath(nodes: RecordedNode[], into = new Map<string, RecordedNode>()) {
     for (const n of nodes) {
-        if (n.path) into.add(n.path);
-        if (n.children) pathsOf(n.children, into);
+        if (n.path) into.set(n.path, n);
+        if (n.children) byPath(n.children, into);
     }
     return into;
 }
 
 function merge(fresh: RecordedNode[], old: RecordedNode[] | undefined): RecordedNode[] {
     if (!old) return fresh;
-    const known = pathsOf(fresh);
-    const missing: RecordedNode[] = [];
+    const known = byPath(fresh);
+    const atRoot: RecordedNode[] = [];
     const collect = (nodes: RecordedNode[]) => nodes.forEach(n => {
-        if (n.kind === "group" && n.children) collect(n.children);
-        else if (n.path && !known.has(n.path)) missing.push(n);
-        else if (n.children) collect(n.children);
+        if (n.kind === "group") return n.children && collect(n.children);
+        if (!n.path) return;
+        if (known.has(n.path)) return n.children && collect(n.children);
+        const parent = known.get(parentOf(n.path));
+        if (parent?.children) parent.children.push(n);
+        else atRoot.push(n);
     });
     collect(old);
-    return missing.length ? [...fresh, { kind: "group", type: "group", label: "", children: missing }] : fresh;
+    return capped(atRoot.length ? [...fresh, { kind: "group", type: "group", label: "", children: atRoot }] : fresh);
 }
 
 let recorded: Record<string, RecordedNode[]> = {};
 const signatures = new Map<string, string>();
 const failedMenus = new Set<string>();
 const listeners = new Set<() => void>();
+const notify = () => listeners.forEach(l => l());
 
-const saveRecording = proxyLazy(() => lodash.debounce(() => DataStore.set(PATTERNS.recordingKey, recorded), PATTERNS.recordingSaveDelay));
+const saveRecording = proxyLazy(() => lodash.debounce(() => {
+    DataStore.set(PATTERNS.recordingKey, recorded).catch(e => logger.error("Saving the seen menus failed.", e));
+}, PATTERNS.recordingSaveDelay));
 
 export async function loadRecording() {
-    recorded = await DataStore.get<Record<string, RecordedNode[]>>(PATTERNS.recordingKey) ?? {};
-    listeners.forEach(l => l());
+    const stored = await DataStore.get<Record<string, RecordedNode[]>>(PATTERNS.recordingKey) ?? {};
+    const migrated = lodash.mapValues(stored, capped);
+    recorded = { ...migrated, ...recorded };
+    if (!lodash.isEqual(migrated, stored)) saveRecording();
+    notify();
 }
 
-export function flushRecording() {
+export function stopRecording() {
     saveRecording.flush();
+    signatures.clear();
+    failedMenus.clear();
 }
 
 export const getRecorded = () => recorded;
@@ -257,17 +340,16 @@ export function forgetRecording(navId: string) {
     recorded = rest;
     signatures.delete(navId);
     saveRecording();
-    listeners.forEach(l => l());
+    notify();
 }
 
 function record(navId: string, nodes: MenuNode[]) {
-    const fresh = toRecorded(nodes);
-    const sig = signature(fresh);
+    const sig = signature(nodes);
     if (signatures.get(navId) === sig) return;
     signatures.set(navId, sig);
-    recorded = { ...recorded, [navId]: merge(fresh, recorded[navId]) };
+    recorded = { ...recorded, [navId]: merge(capped(nodes), recorded[navId]) };
     saveRecording();
-    listeners.forEach(l => l());
+    notify();
 }
 
 export function transform(children: ReactNode, navId: string, layout: MenuLayout | undefined, extra: ReactNode): ReactNode {
@@ -283,6 +365,6 @@ export function transform(children: ReactNode, navId: string, layout: MenuLayout
             failedMenus.add(navId);
             logger.error(`Customising ${navId} failed, showing it unchanged.`, e);
         }
-        return children;
+        return extra ? [children, extra] : children;
     }
 }

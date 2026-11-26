@@ -19,10 +19,10 @@ import { Switch } from "@components/Switch";
 import { classNameFactory } from "@utils/css";
 import { classes } from "@utils/misc";
 import { OptionType } from "@utils/types";
-import { lodash, Modal, openModal, React, Select, TextInput, useCallback, useEffect, useRef, useState } from "@webpack/common";
+import { lodash, Modal, openModal, React, Select, TextInput, useCallback, useEffect, useMemo, useRef, useState } from "@webpack/common";
 
 import { PATTERNS } from "./patterns";
-import { applyLayout, emptyLayout, forgetRecording, getRecorded, MenuLayout, MenuNode, Move, RecordedNode, subscribeRecording } from "./transform";
+import { applyLayout, displayPath, forgetRecording, getRecorded, isEmptyLayout, keyMatches, MenuLayout, MenuNode, Move, normaliseLayout, RecordedNode, subscribeRecording } from "./transform";
 
 const cl = classNameFactory("vc-menu-customisation-");
 
@@ -40,7 +40,7 @@ export const settings = definePluginSettings({
 
 const LAYOUT_KEYS: ["layouts"] = ["layouts"];
 
-const KEEP = "\u0000keep";
+const KEEP = PATTERNS.keepPlace;
 
 function Input({ value, placeholder, onCommit }: { value: string; placeholder: string; onCommit(value: string): void; }) {
     const [draft, setDraft] = useState(value);
@@ -108,9 +108,22 @@ interface ItemFormProps {
     original?: RecordedNode;
     targets: { label: string; value: string; }[];
     save(layout: MenuLayout): void;
+    moveTo(move: Move): void;
 }
 
-function ItemForm({ row, layout, original, targets, save }: ItemFormProps) {
+const lastMoveOf = (layout: MenuLayout, node: MenuNode) => layout.moves.findLast(m => keyMatches(m.item, node));
+const renameOf = (layout: MenuLayout, node: MenuNode) => Object.entries(layout.renames).find(([k]) => keyMatches(k, node))?.[1];
+const isHidden = (layout: MenuLayout, node: MenuNode) => layout.hidden.some(k => keyMatches(k, node));
+
+function descendantPaths(node: MenuNode, into = new Set<string>()) {
+    for (const child of node.children ?? []) {
+        if (child.path) into.add(child.path);
+        descendantPaths(child, into);
+    }
+    return into;
+}
+
+function ItemForm({ row, layout, original, targets, save, moveTo }: ItemFormProps) {
     const { node } = row;
     const key = node.path ?? node.id ?? "";
 
@@ -129,31 +142,31 @@ function ItemForm({ row, layout, original, targets, save }: ItemFormProps) {
         );
     }
 
-    const move = layout.moves.find(m => m.item === key);
-    const setInto = (value: string) => {
-        const moves = layout.moves.filter(m => m.item !== key);
-        save({ ...layout, moves: value === KEEP ? moves : [...moves, { item: key, into: value }] });
-    };
+    const move = lastMoveOf(layout, node);
+    const inside = descendantPaths(node);
+    const setInto = (value: string) => value === KEEP
+        ? save({ ...layout, moves: layout.moves.filter(m => !keyMatches(m.item, node)) })
+        : moveTo({ item: key, into: value });
 
     return (
         <div className={cl("grid")}>
             <Span weight="medium" size="md">Label</Span>
             <Input
-                value={layout.renames[key] ?? ""}
+                value={renameOf(layout, node) ?? ""}
                 placeholder={original?.label ?? node.label}
                 onCommit={label => {
-                    const { [key]: _, ...renames } = layout.renames;
+                    const renames = lodash.pickBy(layout.renames, (_, k) => !keyMatches(k, node));
                     save({ ...layout, renames: label ? { ...renames, [key]: label } : renames });
                 }}
             />
             <Span weight="medium" size="md">Hidden</Span>
             <Switch
-                checked={layout.hidden.includes(key)}
-                onChange={hide => save({ ...layout, hidden: hide ? [...layout.hidden, key] : layout.hidden.filter(k => k !== key) })}
+                checked={isHidden(layout, node)}
+                onChange={hide => save({ ...layout, hidden: hide ? [...layout.hidden, key] : layout.hidden.filter(k => !keyMatches(k, node)) })}
             />
             <Span weight="medium" size="md">Put into</Span>
             <Select
-                options={[{ label: "Where it was", value: KEEP }, ...targets.filter(t => t.value !== key)]}
+                options={[{ label: "Where it was", value: KEEP }, ...targets.filter(t => t.value !== key && !inside.has(t.value))]}
                 isSelected={v => v === (move?.into ?? KEEP)}
                 select={setInto}
                 serialize={v => v}
@@ -172,47 +185,70 @@ function ItemCard({ children, ...form }: ItemFormProps & { children: React.React
 interface Drop { index: number; after: boolean; }
 
 function badges(row: Row, layout: MenuLayout) {
-    const key = row.node.path ?? "";
+    const { node } = row;
     return [
-        row.node.synthetic ? "New submenu" : row.node.type,
-        layout.hidden.includes(key) && "Hidden",
-        layout.renames[key] && "Renamed",
-        layout.moves.some(m => m.item === key) && "Moved"
+        node.synthetic ? "New submenu" : node.type,
+        isHidden(layout, node) && "Hidden",
+        renameOf(layout, node) && "Renamed",
+        lastMoveOf(layout, node) && "Moved"
     ].filter(Boolean).join(" · ");
+}
+
+function rowKeys(rows: Row[]) {
+    const counters = new Map<string, number>();
+    return rows.map(row => {
+        if (row.node.path) return row.node.path;
+        const n = counters.get(row.container) ?? 0;
+        counters.set(row.container, n + 1);
+        return `${row.container}${PATTERNS.pathSeparator}#${n}`;
+    });
 }
 
 function LayoutEditor({ initialNavId }: { initialNavId?: string; }) {
     const layouts = settings.use(LAYOUT_KEYS).layouts ?? {};
     const recorded = useRecorded();
-    const navIds = [...new Set([...Object.keys(recorded), ...Object.keys(layouts)])].sort();
-    const [navId, setNavId] = useState(initialNavId ?? navIds[0] ?? "");
+    const navIds = [...new Set([...Object.keys(recorded), ...Object.keys(layouts)])].filter(Boolean).sort();
+    const [chosen, setNavId] = useState(initialNavId ?? "");
+    const navId = navIds.includes(chosen) ? chosen : navIds[0] ?? "";
     const [dragged, setDragged] = useState<number | null>(null);
     const [drop, setDrop] = useState<Drop | null>(null);
     const [newLabel, setNewLabel] = useState("");
 
-    if (!navIds.length) return <Paragraph>No menus seen yet. Open a few right-click menus, then come back.</Paragraph>;
-
-    const layout = layouts[navId] ?? emptyLayout();
-    const save = (next: MenuLayout) => settings.store.layouts = lodash.cloneDeep({ ...layouts, [navId]: next });
+    const stored = layouts[navId];
+    const layout = useMemo(() => normaliseLayout(stored), [stored]);
     const original = recorded[navId] ?? [];
-    const known = recordedPaths(original);
-    const preview: MenuNode[] = applyLayout(lodash.cloneDeep(original), { ...layout, hidden: [] });
-    const rows = toRows(preview);
+    const known = useMemo(() => recordedPaths(original), [original]);
+    const rows = useMemo(() => toRows(applyLayout(lodash.cloneDeep(original), { ...layout, hidden: [] })), [original, layout]);
+
+    if (!navId) return <Paragraph>No menus seen yet. Open a few right-click menus, then come back.</Paragraph>;
+
+    const save = (next: MenuLayout) => {
+        const { [navId]: _, ...rest } = layouts;
+        settings.store.layouts = lodash.cloneDeep(isEmptyLayout(next) ? rest : { ...rest, [navId]: next });
+    };
+    const keys = rowKeys(rows);
+    const shown = new Set(rows.map(r => r.node.path));
     const targets = [
         { label: "Top level", value: "" },
         ...Object.entries(layout.submenus).map(([id, s]) => ({ label: `${s.label} (new)`, value: id })),
         ...[...known.values()].filter(n => n.kind === "submenu").map(n => ({ label: n.label, value: n.path ?? "" }))
     ];
+    const knownNodes = [...known.values()];
     const unseen = [...new Set([...layout.hidden, ...Object.keys(layout.renames), ...layout.moves.map(m => m.item)])]
-        .filter(k => !known.has(k) && !layout.submenus[k]);
-    const placed = new Set(layout.moves.map(m => m.into));
-    const emptySubmenus = Object.entries(layout.submenus).filter(([id]) => !placed.has(id));
+        .filter(k => !layout.submenus[k] && !knownNodes.some(n => keyMatches(k, n)));
+    const orphanSubmenus = Object.entries(layout.submenus).filter(([id]) => !shown.has(id));
 
-    const moveTo = (move: Move) => save({ ...layout, moves: [...layout.moves.filter(m => m.item !== move.item), move] });
-    const removeKey = (key: string) => {
-        const { [key]: _, ...renames } = layout.renames;
-        save({ ...layout, hidden: layout.hidden.filter(k => k !== key), renames, moves: layout.moves.filter(m => m.item !== key) });
+    const moveTo = (move: Move) => {
+        const last = layout.moves.at(-1);
+        const moves = last?.item === move.item ? layout.moves.slice(0, -1) : layout.moves;
+        save({ ...layout, moves: [...moves, move] });
     };
+    const removeKey = (key: string) => save({
+        ...layout,
+        hidden: layout.hidden.filter(k => k !== key),
+        renames: lodash.omit(layout.renames, key),
+        moves: layout.moves.filter(m => m.item !== key)
+    });
 
     const onDragOver = (index: number) => (e: React.DragEvent) => {
         if (dragged === null) return;
@@ -226,7 +262,7 @@ function LayoutEditor({ initialNavId }: { initialNavId?: string; }) {
         e.preventDefault();
         const source = rows[dragged];
         const target = drop && rows[drop.index];
-        if (target && source !== target && source.node.path && target.node.path)
+        if (target && source !== target && source.node.path && target.node.path && !descendantPaths(source.node).has(target.node.path) && target.container !== source.node.path)
             moveTo({ item: source.node.path, into: target.container, anchor: target.node.path, before: !drop.after });
         setDragged(null);
         setDrop(null);
@@ -249,7 +285,7 @@ function LayoutEditor({ initialNavId }: { initialNavId?: string; }) {
             <Flex flexDirection="column" gap="0.5em">
                 {rows.map((row, index) => (
                     <div
-                        key={(row.node.path ?? row.node.label) + index}
+                        key={keys[index]}
                         className={cl("row", { "row-dragging": dragged === index, "row-group": row.groupStart })}
                         style={{ marginLeft: `${row.depth * 1.5}em` }}
                         onDragOver={onDragOver(index)}
@@ -257,7 +293,7 @@ function LayoutEditor({ initialNavId }: { initialNavId?: string; }) {
                     >
                         {drop?.index === index && <div className={cl("drop", drop.after ? "drop-after" : "drop-before")} />}
                         {row.node.path
-                            ? <ItemCard row={row} layout={layout} original={known.get(row.node.path)} targets={targets} save={save}>
+                            ? <ItemCard row={row} layout={layout} original={known.get(row.node.path)} targets={targets} save={save} moveTo={moveTo}>
                                 <div
                                     className={cl("header")}
                                     draggable
@@ -265,7 +301,7 @@ function LayoutEditor({ initialNavId }: { initialNavId?: string; }) {
                                     onDragEnd={() => { setDragged(null); setDrop(null); }}
                                 >
                                     <Paragraph weight="medium" size="md">{row.node.label}</Paragraph>
-                                    <Paragraph size="sm">{badges(row, layout)} · {row.node.path}</Paragraph>
+                                    <Paragraph size="sm">{badges(row, layout)} · {displayPath(row.node.path)}</Paragraph>
                                 </div>
                             </ItemCard>
                             : <Paragraph size="sm" className={cl("opaque")}>{row.node.label || row.node.type} (no id, can't be customised)</Paragraph>}
@@ -278,7 +314,7 @@ function LayoutEditor({ initialNavId }: { initialNavId?: string; }) {
                 <Flex flexDirection="column" gap="0.5em">
                     {layout.hidden.map(key => (
                         <Flex key={key} className={cl("line")} alignItems="center" justifyContent="space-between">
-                            <Paragraph size="md">{known.get(key)?.label ?? key}</Paragraph>
+                            <Paragraph size="md">{knownNodes.find(n => keyMatches(key, n))?.label ?? displayPath(key)}</Paragraph>
                             <Button size="small" onClick={() => save({ ...layout, hidden: layout.hidden.filter(k => k !== key) })}>Show</Button>
                         </Flex>
                     ))}
@@ -288,12 +324,12 @@ function LayoutEditor({ initialNavId }: { initialNavId?: string; }) {
             <Heading className={classes(Margins.top20, Margins.bottom8)}>Submenus</Heading>
             <Paragraph className={Margins.bottom8}>A new submenu shows up once you put an item into it.</Paragraph>
             <Flex flexDirection="column" gap="0.5em">
-                {emptySubmenus.map(([id, s]) => (
+                {orphanSubmenus.map(([id, s]) => (
                     <Flex key={id} className={cl("line")} alignItems="center" justifyContent="space-between">
-                        <Paragraph size="md">{s.label} (empty)</Paragraph>
+                        <Paragraph size="md">{s.label} (not shown, nothing seen is in it)</Paragraph>
                         <Button size="small" variant="dangerPrimary" onClick={() => {
                             const { [id]: _, ...submenus } = layout.submenus;
-                            save({ ...layout, submenus });
+                            save({ ...layout, submenus, moves: layout.moves.filter(m => m.into !== id && m.item !== id) });
                         }}>Delete</Button>
                     </Flex>
                 ))}
@@ -314,7 +350,7 @@ function LayoutEditor({ initialNavId }: { initialNavId?: string; }) {
                 <Flex flexDirection="column" gap="0.5em">
                     {unseen.map(key => (
                         <Flex key={key} className={cl("line", "unseen")} alignItems="center" justifyContent="space-between">
-                            <Paragraph size="md">{key}</Paragraph>
+                            <Paragraph size="md">{displayPath(key)}</Paragraph>
                             <Button size="small" variant="dangerPrimary" onClick={() => removeKey(key)}>Remove Rules</Button>
                         </Flex>
                     ))}

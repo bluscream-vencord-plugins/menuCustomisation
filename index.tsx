@@ -10,7 +10,7 @@ import type { ReactNode } from "react";
 
 import { openEditor, settings } from "./editor";
 import { PATTERNS } from "./patterns";
-import { flushRecording, loadRecording, transform } from "./transform";
+import { loadRecording, normaliseLayout, stopRecording, transform } from "./transform";
 
 function customiseItem(navId: string): ReactNode {
     if (!settings.store.customiseItem) return null;
@@ -28,6 +28,7 @@ export default definePlugin({
         { name: "Bluscream", id: 467777925790564352n },
         { name: "Claude Opus 5.5", id: 0n }
     ],
+    dependencies: ["ContextMenuAPI"],
     settings,
 
     patches: [
@@ -35,13 +36,14 @@ export default definePlugin({
             find: PATTERNS.menuFind,
             replacement: {
                 match: PATTERNS.menuMatch,
-                replace: "$self.customise($&,arguments[0]?.navId)"
+                replace: "$self.customise($&,arguments[0].navId)"
             }
         }
     ],
 
     customise(children: ReactNode, navId: string) {
-        return transform(children, navId, settings.plain.layouts?.[navId], customiseItem(navId));
+        const layout = settings.plain.layouts?.[navId];
+        return transform(children, navId, layout && normaliseLayout(layout), customiseItem(navId));
     },
 
     start() {
@@ -49,6 +51,6 @@ export default definePlugin({
     },
 
     stop() {
-        flushRecording();
+        stopRecording();
     }
 });
