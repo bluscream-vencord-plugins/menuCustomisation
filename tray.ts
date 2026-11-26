@@ -52,6 +52,14 @@ function toTree(nodes: MenuNode[]): TrayNode[] {
     });
 }
 
+function disabledKeys(nodes: MenuNode[], into: string[] = []) {
+    for (const n of nodes) {
+        if (n.id && !n.children && n.override?.disabled) into.push(n.id);
+        if (n.children) disabledKeys(n.children, into);
+    }
+    return into;
+}
+
 function itemKeys(nodes: MenuNode[], into = new Set<string>()) {
     for (const n of nodes) {
         if (n.id && !n.synthetic && !n.children) into.add(n.id);
@@ -69,12 +77,12 @@ export async function syncTray() {
 
     const layout = readLayout();
     const recorded: MenuNode[] = getRecorded()[PATTERNS.trayNavId] ?? [];
-    let payload: { tree: TrayNode[]; hidden: string[]; } | null = null;
+    let payload: { tree: TrayNode[]; hidden: string[]; disabled: string[]; } | null = null;
     if (layout) {
         const all = itemKeys(lodash.cloneDeep(recorded));
         const placed = applyLayout(lodash.cloneDeep(recorded), layout);
         const kept = itemKeys(placed);
-        payload = { tree: toTree(placed), hidden: [...all].filter(key => !kept.has(key)) };
+        payload = { tree: toTree(placed), hidden: [...all].filter(key => !kept.has(key)), disabled: disabledKeys(placed) };
     }
     const json = JSON.stringify(payload);
     if (json === lastSent) return;

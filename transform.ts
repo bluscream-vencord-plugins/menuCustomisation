@@ -58,8 +58,8 @@ const OVERRIDABLE: Record<string, Array<keyof ItemOverride>> = {
     submenu: ["label", "subtext", "color", "icon", "disabled"],
     checkbox: ["label", "subtext", "disabled"],
     radio: ["label", "subtext", "disabled"],
-    [PATTERNS.trayTypes.item]: ["label"],
-    [PATTERNS.trayTypes.checkbox]: ["label"]
+    [PATTERNS.trayTypes.item]: ["label", "disabled"],
+    [PATTERNS.trayTypes.checkbox]: ["label", "disabled"]
 };
 
 export const overridableFields = (type: string) => OVERRIDABLE[type] ?? [];

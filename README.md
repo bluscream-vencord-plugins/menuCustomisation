@@ -26,7 +26,7 @@ Rules match an item by its full path first (its submenu ids and its own id), the
 
 ## Tray menu
 
-With the optional [NativeUtils](https://github.com/bluscream-vencord-plugins/nativeUtils) plugin installed and enabled, Equibop's tray menu can be customised too. It shows up as the **tray** menu in the editor, with Equibop's own items and items other plugins add (like [BetterTrayMenu](https://github.com/bluscream-vencord-plugins/betterTrayMenu)). You can hide, rename and move them and put them into submenus; subtext, colours, icons and disabling aren't available there. The tray also gets a **Customise menus…** item that opens the editor on it.
+With the optional [NativeUtils](https://github.com/bluscream-vencord-plugins/nativeUtils) plugin installed and enabled, Equibop's tray menu can be customised too. It shows up as the **tray** menu in the editor, with Equibop's own items and items other plugins add (like [BetterTrayMenu](https://github.com/bluscream-vencord-plugins/betterTrayMenu)). You can hide, disable (grey out), rename and move them and put them into submenus; subtext, colours and icons aren't available there. The tray also gets a **Customise menus…** item that opens the editor on it.
 
 The tray layout is sent to NativeUtils every few seconds and right after you change it. NativeUtils' tray hook only loads on startup, so after installing or updating it, restart Discord fully once. On Linux, submenus show as their items between separators. Without NativeUtils, everything else works the same.
 

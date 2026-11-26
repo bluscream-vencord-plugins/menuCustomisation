@@ -369,7 +369,7 @@ function LayoutEditor({ initialNavId }: { initialNavId?: string; }) {
             <TextInput value={filter} placeholder="Filter items by label or id" onChange={setFilter} />
             {filtering && <Paragraph size="sm">Showing matching items and the submenus they're in. Clear the filter to drag items.</Paragraph>}
             {navId === PATTERNS.trayNavId && <Paragraph>
-                Equibop's tray menu, through the NativeUtils plugin. Only hiding, renaming, moving and submenus work here. On Linux, submenus show as their items between separators.
+                Equibop's tray menu, through the NativeUtils plugin. Only hiding, disabling, renaming, moving and submenus work here. On Linux, submenus show as their items between separators.
                 If the tray doesn't change, restart Discord fully once: the tray hook only loads on startup.
             </Paragraph>}
 
