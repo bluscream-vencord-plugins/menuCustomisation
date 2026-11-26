@@ -57,7 +57,9 @@ const OVERRIDABLE: Record<string, Array<keyof ItemOverride>> = {
     item: ["label", "subtext", "color", "icon", "disabled"],
     submenu: ["label", "subtext", "color", "icon", "disabled"],
     checkbox: ["label", "subtext", "disabled"],
-    radio: ["label", "subtext", "disabled"]
+    radio: ["label", "subtext", "disabled"],
+    [PATTERNS.trayTypes.item]: ["label"],
+    [PATTERNS.trayTypes.checkbox]: ["label"]
 };
 
 export const overridableFields = (type: string) => OVERRIDABLE[type] ?? [];
@@ -401,7 +403,7 @@ export function forgetRecording(navId: string) {
     notify();
 }
 
-function record(navId: string, nodes: MenuNode[]) {
+export function record(navId: string, nodes: MenuNode[]) {
     const sig = signature(nodes);
     if (signatures.get(navId) === sig) return;
     signatures.set(navId, sig);

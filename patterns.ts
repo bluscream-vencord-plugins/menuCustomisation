@@ -43,5 +43,11 @@ export const PATTERNS = {
     nativeUtils: "NativeUtils",
     trayOwner: "MenuCustomisation",
     trayItem: { id: "customise", label: "Customise menus…" },
-    trayRetryDelayMs: 5000
+    trayRetryDelayMs: 5000,
+    /** Pseudo menu id for Equibop's tray menu in the editor and in `layouts`. */
+    trayNavId: "tray",
+    /** Node types for tray entries; only their label can be overridden. */
+    trayTypes: { item: "tray-item", checkbox: "tray-checkbox" },
+    /** How often the tray's items are read and its layout re-sent to NativeUtils. */
+    traySyncMs: 5000
 };

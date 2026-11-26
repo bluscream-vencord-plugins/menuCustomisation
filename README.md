@@ -24,7 +24,11 @@ Checkboxes and radio items only support label, subtext and disabled. Sliders and
 
 Rules match an item by its full path first (its submenu ids and its own id), then by its own id anywhere in the menu, so they keep working when an item moves between submenus. A rule key ending in `*` matches every id that starts with the rest, so a rule made on a wildcard item applies to all of them.
 
-With the optional [NativeUtils](https://github.com/bluscream-vencord-plugins/nativeUtils) plugin installed and enabled, Equibop's tray menu also gets a **Customise menus…** item that opens the editor. Without it, everything else works the same.
+## Tray menu
+
+With the optional [NativeUtils](https://github.com/bluscream-vencord-plugins/nativeUtils) plugin installed and enabled, Equibop's tray menu can be customised too. It shows up as the **tray** menu in the editor, with Equibop's own items and items other plugins add (like [BetterTrayMenu](https://github.com/bluscream-vencord-plugins/betterTrayMenu)). You can hide, rename and move them and put them into submenus; subtext, colours, icons and disabling aren't available there. The tray also gets a **Customise menus…** item that opens the editor on it.
+
+The tray layout is sent to NativeUtils every few seconds and right after you change it. NativeUtils' tray hook only loads on startup, so after installing or updating it, restart Discord fully once. On Linux, submenus show as their items between separators. Without NativeUtils, everything else works the same.
 
 ## Limits
 

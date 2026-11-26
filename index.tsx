@@ -14,6 +14,7 @@ import type { ReactNode } from "react";
 import { openEditor, settings } from "./editor";
 import { PATTERNS } from "./patterns";
 import { loadRecording, normaliseLayout, stopRecording, transform } from "./transform";
+import { startTraySync, stopTraySync } from "./tray";
 
 function customiseItem(navId: string): ReactNode {
     if (!settings.store.customiseItem) return null;
@@ -47,7 +48,7 @@ async function trayLoop() {
             const id = await native.waitTrayClick(PATTERNS.trayOwner);
             if (trayRunning && id === PATTERNS.trayItem.id) {
                 VesktopNative?.win?.focus?.();
-                openEditor("");
+                openEditor(PATTERNS.trayNavId);
             }
         } catch (e) {
             logger.warn("Tray item failed", e);
@@ -89,10 +90,15 @@ export default definePlugin({
         loadRecording();
         trayRunning = true;
         trayLoop();
+        startTraySync(() => {
+            const layout = settings.plain.layouts?.[PATTERNS.trayNavId];
+            return layout && normaliseLayout(layout);
+        });
     },
 
     stop() {
         trayRunning = false;
+        stopTraySync();
         nativeUtils()?.setTrayItems(PATTERNS.trayOwner, []).catch(e => logger.warn("Clearing the tray item failed", e));
         stopRecording();
     }

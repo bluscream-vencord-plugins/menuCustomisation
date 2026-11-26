@@ -24,9 +24,10 @@ import { lodash, Modal, openModal, React, Select, TextInput, useCallback, useEff
 import { ICONS, isImageUrl } from "./icons";
 import { PATTERNS } from "./patterns";
 import {
-    applyLayout, displayPath, forgetRecording, getRecorded, isEmptyLayout, ItemOverride, keyMatches, MenuLayout, MenuNode, Move,
+    applyLayout, displayPath, forgetRecording, getRecorded, isEmptyLayout, ItemOverride, keyMatches, logger, MenuLayout, MenuNode, Move,
     normaliseLayout, overridableFields, RecordedNode, subscribeRecording
 } from "./transform";
+import { syncTray, trayHelpers } from "./tray";
 
 const cl = classNameFactory("vc-menu-customisation-");
 
@@ -274,7 +275,8 @@ function rowKeys(rows: Row[]) {
 function LayoutEditor({ initialNavId }: { initialNavId?: string; }) {
     const layouts = settings.use(LAYOUT_KEYS).layouts ?? {};
     const recorded = useRecorded();
-    const navIds = [...new Set([...Object.keys(recorded), ...Object.keys(layouts)])].filter(Boolean).sort();
+    const navIds = [...new Set([...Object.keys(recorded), ...Object.keys(layouts)])]
+        .filter(id => id && (id !== PATTERNS.trayNavId || trayHelpers())).sort();
     const [chosen, setNavId] = useState(initialNavId ?? "");
     const navId = navIds.includes(chosen) ? chosen : navIds[0] ?? "";
     const [dragged, setDragged] = useState<number | null>(null);
@@ -292,6 +294,7 @@ function LayoutEditor({ initialNavId }: { initialNavId?: string; }) {
     const save = (next: MenuLayout) => {
         const { [navId]: _, ...rest } = layouts;
         settings.store.layouts = lodash.cloneDeep(isEmptyLayout(next) ? rest : { ...rest, [navId]: next });
+        if (navId === PATTERNS.trayNavId) syncTray().catch(e => logger.warn("Syncing the tray menu failed", e));
     };
     const keys = rowKeys(rows);
     const shown = new Set(rows.map(r => r.node.path));
@@ -348,6 +351,10 @@ function LayoutEditor({ initialNavId }: { initialNavId?: string; }) {
                 select={setNavId}
                 serialize={v => v}
             />
+            {navId === PATTERNS.trayNavId && <Paragraph className={Margins.bottom16}>
+                Equibop's tray menu, through the NativeUtils plugin. Only hiding, renaming, moving and submenus work here. On Linux, submenus show as their items between separators.
+                If the tray doesn't change, restart Discord fully once: the tray hook only loads on startup.
+            </Paragraph>}
 
             <Flex flexDirection="column" gap="0.5em">
                 {rows.map((row, index) => (
