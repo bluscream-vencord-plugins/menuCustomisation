@@ -183,7 +183,7 @@ export function applyLayout(root: MenuNode[], layout: MenuLayout): MenuNode[] {
         for (let i = nodes.length - 1; i >= 0; i--) {
             const node = nodes[i];
             if (node.children) prune(node.children);
-            if (node.synthetic && !node.children?.length) nodes.splice(i, 1);
+            if (node.type === "submenu" && !node.children?.length) nodes.splice(i, 1);
         }
     };
     prune(root);
