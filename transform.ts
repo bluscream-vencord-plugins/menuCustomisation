@@ -10,6 +10,7 @@ import { Logger } from "@utils/Logger";
 import { lodash, Menu, React } from "@webpack/common";
 import type { ReactElement, ReactNode } from "react";
 
+import { resolveIcon } from "./icons";
 import { PATTERNS } from "./patterns";
 
 export const logger = new Logger("MenuCustomisation");
@@ -24,25 +25,53 @@ export interface Move {
     before?: boolean;
 }
 
+export interface ItemOverride {
+    label?: string;
+    subtext?: string;
+    color?: string;
+    icon?: string;
+    disabled?: boolean;
+}
+
 export interface MenuLayout {
     hidden: string[];
-    renames: Record<string, string>;
+    overrides: Record<string, ItemOverride>;
     submenus: Record<string, { label: string; }>;
     moves: Move[];
 }
 
-export const emptyLayout = (): MenuLayout => ({ hidden: [], renames: {}, submenus: {}, moves: [] });
+type StoredLayout = Partial<MenuLayout> & { renames?: Record<string, string>; };
 
-export const normaliseLayout = (layout?: Partial<MenuLayout>): MenuLayout => ({ ...emptyLayout(), ...layout });
+export const emptyLayout = (): MenuLayout => ({ hidden: [], overrides: {}, submenus: {}, moves: [] });
+
+export function normaliseLayout(layout?: StoredLayout): MenuLayout {
+    const { renames, ...rest } = layout ?? {};
+    const fromRenames = lodash.mapValues(renames ?? {}, (label): ItemOverride => ({ label }));
+    return { ...emptyLayout(), ...rest, overrides: { ...fromRenames, ...rest.overrides } };
+}
 
 export const isEmptyLayout = (layout: MenuLayout) =>
-    !layout.hidden.length && !layout.moves.length && !Object.keys(layout.renames).length && !Object.keys(layout.submenus).length;
+    !layout.hidden.length && !layout.moves.length && !Object.keys(layout.overrides).length && !Object.keys(layout.submenus).length;
+
+const OVERRIDABLE: Record<string, Array<keyof ItemOverride>> = {
+    item: ["label", "subtext", "color", "icon", "disabled"],
+    submenu: ["label", "subtext", "color", "icon", "disabled"],
+    checkbox: ["label", "subtext", "disabled"],
+    radio: ["label", "subtext", "disabled"]
+};
+
+export const overridableFields = (type: string) => OVERRIDABLE[type] ?? [];
 
 export type NodeKind = "group" | "submenu" | "item" | "opaque";
 
 interface ItemProps {
     id?: string;
     label?: ReactNode;
+    subtext?: ReactNode;
+    color?: string;
+    icon?: unknown;
+    leadingAccessory?: unknown;
+    disabled?: boolean;
     children?: ReactNode;
     render?: unknown;
     action?: unknown;
@@ -58,7 +87,7 @@ export interface MenuNode {
     path?: string;
     children?: MenuNode[];
     synthetic?: boolean;
-    renamed?: boolean;
+    override?: ItemOverride;
     emptied?: boolean;
     el?: MenuElement;
 }
@@ -208,8 +237,11 @@ export function applyLayout(root: MenuNode[], layout: MenuLayout): MenuNode[] {
         }
     }
 
-    for (const [key, label] of Object.entries(layout.renames)) {
-        if (label) resolveAll(map, key).forEach(e => Object.assign(e.node, { label, renamed: true }));
+    for (const [key, override] of Object.entries(layout.overrides)) {
+        for (const { node } of resolveAll(map, key)) {
+            node.override = { ...node.override, ...override };
+            if (override.label) node.label = override.label;
+        }
     }
 
     const prune = (nodes: MenuNode[]) => {
@@ -234,9 +266,23 @@ function toElements(nodes: MenuNode[]): ReactNode[] {
         const props: ItemProps = { ...el.props };
         if (children) props.children = children;
         else if (node.emptied) delete props.children;
-        if (node.renamed) props.label = node.label;
+        if (node.override) applyOverride(props, node.override, overridableFields(node.type));
         return { ...el, props };
     });
+}
+
+function applyOverride(props: ItemProps, override: ItemOverride, fields: Array<keyof ItemOverride>) {
+    if (fields.includes("label") && override.label) props.label = override.label;
+    if (fields.includes("subtext") && override.subtext) props.subtext = override.subtext;
+    if (fields.includes("color") && override.color) props.color = override.color;
+    if (fields.includes("disabled") && override.disabled !== undefined) props.disabled = override.disabled;
+    if (fields.includes("icon") && override.icon) {
+        const icon = resolveIcon(override.icon);
+        if (icon === null) {
+            delete props.icon;
+            delete props.leadingAccessory;
+        } else if (icon) props.icon = icon;
+    }
 }
 
 function normaliseId(id: string) {

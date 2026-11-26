@@ -5,6 +5,39 @@
     align-items: center;
 }
 
+.vc-menu-customisation-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75em 1em;
+}
+
+.vc-menu-customisation-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25em;
+    flex: 1 1 calc(33% - 1em);
+    min-width: 160px;
+}
+
+.vc-menu-customisation-field-wide {
+    flex-basis: calc(50% - 1em);
+}
+
+.vc-menu-customisation-switches {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.5em;
+    width: 100%;
+}
+
+.vc-menu-customisation-switches .vc-menu-customisation-field {
+    flex: 0 0 auto;
+    min-width: 0;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.75em;
+}
+
 .vc-menu-customisation-header {
     flex: 1;
     cursor: grab;

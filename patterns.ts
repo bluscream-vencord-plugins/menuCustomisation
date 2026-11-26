@@ -30,5 +30,13 @@ export const PATTERNS = {
     maxChildrenPerLevel: 50,
     maxNodesPerMenu: 500,
     /** The "Put into" choice that keeps an item where Discord put it. */
-    keepPlace: "\u0000keep"
+    keepPlace: "\u0000keep",
+    /** Icon override that removes an item's icon. */
+    iconNone: "none",
+    /** Icon override choice that switches to entering an image address. */
+    iconUrlChoice: "\u0000url",
+    /** Only images from https addresses are used as icons. */
+    imageUrlProtocol: "https:",
+    /** Colours Discord's menu items support (`color` prop). */
+    colors: ["default", "brand", "danger", "premium", "success"]
 };

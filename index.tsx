@@ -5,7 +5,7 @@
  */
 
 import definePlugin from "@utils/types";
-import { Menu } from "@webpack/common";
+import { lodash, Menu } from "@webpack/common";
 import type { ReactNode } from "react";
 
 import { openEditor, settings } from "./editor";
@@ -47,6 +47,9 @@ export default definePlugin({
     },
 
     start() {
+        const { layouts } = settings.plain;
+        if (layouts && Object.values(layouts).some(l => "renames" in l))
+            settings.store.layouts = lodash.cloneDeep(lodash.mapValues(layouts, normaliseLayout));
         loadRecording();
     },
 

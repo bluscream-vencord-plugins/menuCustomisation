@@ -21,8 +21,12 @@ import { classes } from "@utils/misc";
 import { OptionType } from "@utils/types";
 import { lodash, Modal, openModal, React, Select, TextInput, useCallback, useEffect, useMemo, useRef, useState } from "@webpack/common";
 
+import { ICONS, isImageUrl } from "./icons";
 import { PATTERNS } from "./patterns";
-import { applyLayout, displayPath, forgetRecording, getRecorded, isEmptyLayout, keyMatches, MenuLayout, MenuNode, Move, normaliseLayout, RecordedNode, subscribeRecording } from "./transform";
+import {
+    applyLayout, displayPath, forgetRecording, getRecorded, isEmptyLayout, ItemOverride, keyMatches, MenuLayout, MenuNode, Move,
+    normaliseLayout, overridableFields, RecordedNode, subscribeRecording
+} from "./transform";
 
 const cl = classNameFactory("vc-menu-customisation-");
 
@@ -112,7 +116,8 @@ interface ItemFormProps {
 }
 
 const lastMoveOf = (layout: MenuLayout, node: MenuNode) => layout.moves.findLast(m => keyMatches(m.item, node));
-const renameOf = (layout: MenuLayout, node: MenuNode) => Object.entries(layout.renames).find(([k]) => keyMatches(k, node))?.[1];
+const overrideOf = (layout: MenuLayout, node: MenuNode): ItemOverride =>
+    Object.assign({}, ...Object.entries(layout.overrides).filter(([k]) => keyMatches(k, node)).map(([, o]) => o));
 const isHidden = (layout: MenuLayout, node: MenuNode) => layout.hidden.some(k => keyMatches(k, node));
 
 function descendantPaths(node: MenuNode, into = new Set<string>()) {
@@ -125,6 +130,7 @@ function descendantPaths(node: MenuNode, into = new Set<string>()) {
 
 function ItemForm({ row, layout, original, targets, save, moveTo }: ItemFormProps) {
     const { node } = row;
+    const [urlMode, setUrlMode] = useState(false);
     const key = node.path ?? node.id ?? "";
 
     if (node.synthetic) {
@@ -144,33 +150,86 @@ function ItemForm({ row, layout, original, targets, save, moveTo }: ItemFormProp
 
     const move = lastMoveOf(layout, node);
     const inside = descendantPaths(node);
+    const fields = overridableFields(node.type);
+    const override = overrideOf(layout, node);
     const setInto = (value: string) => value === KEEP
         ? save({ ...layout, moves: layout.moves.filter(m => !keyMatches(m.item, node)) })
         : moveTo({ item: key, into: value });
+    const setOverride = (patch: ItemOverride) => {
+        const others = lodash.pickBy(layout.overrides, (_, k) => !keyMatches(k, node));
+        const next = lodash.pickBy({ ...override, ...patch }, v => v !== undefined && v !== "" && v !== false);
+        save({ ...layout, overrides: lodash.isEmpty(next) ? others : { ...others, [key]: next } });
+    };
+    const iconChoice = urlMode || (override.icon && isImageUrl(override.icon)) ? PATTERNS.iconUrlChoice : override.icon ?? KEEP;
+    const selectIcon = (value: string) => {
+        setUrlMode(value === PATTERNS.iconUrlChoice);
+        if (value !== PATTERNS.iconUrlChoice) setOverride({ icon: value === KEEP ? undefined : value });
+    };
 
     return (
-        <div className={cl("grid")}>
-            <Span weight="medium" size="md">Label</Span>
-            <Input
-                value={renameOf(layout, node) ?? ""}
-                placeholder={original?.label ?? node.label}
-                onCommit={label => {
-                    const renames = lodash.pickBy(layout.renames, (_, k) => !keyMatches(k, node));
-                    save({ ...layout, renames: label ? { ...renames, [key]: label } : renames });
-                }}
-            />
-            <Span weight="medium" size="md">Hidden</Span>
-            <Switch
-                checked={isHidden(layout, node)}
-                onChange={hide => save({ ...layout, hidden: hide ? [...layout.hidden, key] : layout.hidden.filter(k => !keyMatches(k, node)) })}
-            />
-            <Span weight="medium" size="md">Put into</Span>
-            <Select
-                options={[{ label: "Where it was", value: KEEP }, ...targets.filter(t => t.value !== key && !inside.has(t.value))]}
-                isSelected={v => v === (move?.into ?? KEEP)}
-                select={setInto}
-                serialize={v => v}
-            />
+        <div className={cl("form")}>
+            {fields.includes("label") && <Field label="Label" wide>
+                <Input value={override.label ?? ""} placeholder={original?.label ?? node.label} onCommit={label => setOverride({ label })} />
+            </Field>}
+            {fields.includes("subtext") && <Field label="Subtext" wide>
+                <Input value={override.subtext ?? ""} placeholder="None" onCommit={subtext => setOverride({ subtext })} />
+            </Field>}
+            <Field label="Put into">
+                <Select
+                    options={[{ label: "Where it was", value: KEEP }, ...targets.filter(t => t.value !== key && !inside.has(t.value))]}
+                    isSelected={v => v === (move?.into ?? KEEP)}
+                    select={setInto}
+                    serialize={v => v}
+                />
+            </Field>
+            {fields.includes("color") && <Field label="Colour">
+                <Select
+                    options={[{ label: "Unchanged", value: KEEP }, ...PATTERNS.colors.map(c => ({ label: lodash.capitalize(c), value: c }))]}
+                    isSelected={v => v === (override.color ?? KEEP)}
+                    select={v => setOverride({ color: v === KEEP ? undefined : v })}
+                    serialize={v => v}
+                />
+            </Field>}
+            {fields.includes("icon") && <Field label="Icon">
+                <Select
+                    options={[
+                        { label: "Unchanged", value: KEEP },
+                        { label: "No icon", value: PATTERNS.iconNone },
+                        ...Object.keys(ICONS).map(name => ({ label: name, value: name })),
+                        { label: "Image address…", value: PATTERNS.iconUrlChoice }
+                    ]}
+                    isSelected={v => v === iconChoice}
+                    select={selectIcon}
+                    serialize={v => v}
+                />
+            </Field>}
+            {fields.includes("icon") && iconChoice === PATTERNS.iconUrlChoice && <Field label="Image address" wide>
+                <Input
+                    value={override.icon && isImageUrl(override.icon) ? override.icon : ""}
+                    placeholder="https://…"
+                    onCommit={url => setOverride({ icon: isImageUrl(url) ? url : undefined })}
+                />
+            </Field>}
+            <div className={cl("switches")}>
+                <Field label="Hidden">
+                    <Switch
+                        checked={isHidden(layout, node)}
+                        onChange={hide => save({ ...layout, hidden: hide ? [...layout.hidden, key] : layout.hidden.filter(k => !keyMatches(k, node)) })}
+                    />
+                </Field>
+                {fields.includes("disabled") && <Field label="Disabled">
+                    <Switch checked={!!override.disabled} onChange={disabled => setOverride({ disabled })} />
+                </Field>}
+            </div>
+        </div>
+    );
+}
+
+function Field({ label, wide, children }: { label: string; wide?: boolean; children: React.ReactNode; }) {
+    return (
+        <div className={cl("field", { "field-wide": wide })}>
+            <Span weight="medium" size="sm">{label}</Span>
+            {children}
         </div>
     );
 }
@@ -184,12 +243,20 @@ function ItemCard({ children, ...form }: ItemFormProps & { children: React.React
 
 interface Drop { index: number; after: boolean; }
 
+const OVERRIDE_BADGES: Record<string, string> = {
+    label: "Renamed",
+    subtext: "Subtext",
+    color: "Colour",
+    icon: "Icon",
+    disabled: "Disabled"
+};
+
 function badges(row: Row, layout: MenuLayout) {
     const { node } = row;
     return [
         node.synthetic ? "New submenu" : node.type,
         isHidden(layout, node) && "Hidden",
-        renameOf(layout, node) && "Renamed",
+        ...Object.keys(overrideOf(layout, node)).map(f => OVERRIDE_BADGES[f]),
         lastMoveOf(layout, node) && "Moved"
     ].filter(Boolean).join(" · ");
 }
@@ -234,7 +301,7 @@ function LayoutEditor({ initialNavId }: { initialNavId?: string; }) {
         ...[...known.values()].filter(n => n.kind === "submenu").map(n => ({ label: n.label, value: n.path ?? "" }))
     ];
     const knownNodes = [...known.values()];
-    const unseen = [...new Set([...layout.hidden, ...Object.keys(layout.renames), ...layout.moves.map(m => m.item)])]
+    const unseen = [...new Set([...layout.hidden, ...Object.keys(layout.overrides), ...layout.moves.map(m => m.item)])]
         .filter(k => !layout.submenus[k] && !knownNodes.some(n => keyMatches(k, n)));
     const orphanSubmenus = Object.entries(layout.submenus).filter(([id]) => !shown.has(id));
 
@@ -246,7 +313,7 @@ function LayoutEditor({ initialNavId }: { initialNavId?: string; }) {
     const removeKey = (key: string) => save({
         ...layout,
         hidden: layout.hidden.filter(k => k !== key),
-        renames: lodash.omit(layout.renames, key),
+        overrides: lodash.omit(layout.overrides, key),
         moves: layout.moves.filter(m => m.item !== key)
     });
 
