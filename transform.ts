@@ -254,7 +254,19 @@ export function applyLayout(root: MenuNode[], layout: MenuLayout): MenuNode[] {
         }
     };
     prune(root);
+    tidySeparators(root);
     return root;
+}
+
+const hasItems = (nodes: MenuNode[]): boolean => nodes.some(n => n.type !== "separator" && (n.type !== "group" || hasItems(n.children ?? [])));
+
+function tidySeparators(nodes: MenuNode[]) {
+    for (const node of nodes) if (node.children) tidySeparators(node.children);
+    for (let i = nodes.length - 1; i >= 0; i--)
+        if (nodes[i].type === "group" && !hasItems(nodes[i].children ?? [])) nodes.splice(i, 1);
+    const breaks = (node?: MenuNode) => !node || node.type === "separator" || node.type === "group";
+    for (let i = nodes.length - 1; i >= 0; i--)
+        if (nodes[i].type === "separator" && (breaks(nodes[i - 1]) || breaks(nodes[i + 1]))) nodes.splice(i, 1);
 }
 
 function toElements(nodes: MenuNode[]): ReactNode[] {
