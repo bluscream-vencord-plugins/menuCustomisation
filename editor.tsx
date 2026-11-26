@@ -34,6 +34,11 @@ export const settings = definePluginSettings({
         description: "Add a \"Customise this menu…\" item at the end of every menu.",
         default: true
     },
+    mergeSubmenus: {
+        type: OptionType.BOOLEAN,
+        description: "Merge submenus with the same name and icon in a menu into one.",
+        default: true
+    },
     editor: {
         type: OptionType.COMPONENT,
         component: ErrorBoundary.wrap(() => <LayoutEditor />, { noop: true })

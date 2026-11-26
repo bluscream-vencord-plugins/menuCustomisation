@@ -80,7 +80,7 @@ export default definePlugin({
 
     customise(children: ReactNode, navId: string) {
         const layout = settings.plain.layouts?.[navId];
-        return transform(children, navId, layout && normaliseLayout(layout), customiseItem(navId));
+        return transform(children, navId, layout && normaliseLayout(layout), customiseItem(navId), settings.store.mergeSubmenus);
     },
 
     start() {

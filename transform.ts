@@ -198,7 +198,33 @@ function levelHas(list: MenuNode[], id: string, except: MenuNode): boolean {
 
 const hasLeaves = (nodes: MenuNode[]): boolean => nodes.some(n => n.kind !== "group" || hasLeaves(n.children ?? []));
 
-export function applyLayout(root: MenuNode[], layout: MenuLayout): MenuNode[] {
+function levelEntries(list: MenuNode[], out: Array<{ node: MenuNode; parent: MenuNode[]; }> = []) {
+    for (const node of list) {
+        if (node.kind === "group") levelEntries(node.children ?? [], out);
+        else out.push({ node, parent: list });
+    }
+    return out;
+}
+
+const iconOf = (node: MenuNode) => node.override?.icon ?? node.el?.props.icon;
+
+function mergeDuplicates(list: MenuNode[]) {
+    const kept: MenuNode[] = [];
+    for (const { node, parent } of levelEntries(list)) {
+        if (node.kind !== "submenu" || !node.children) continue;
+        const target = kept.find(k => k.label === node.label && iconOf(k) === iconOf(node));
+        if (!target?.children) {
+            kept.push(node);
+            continue;
+        }
+        for (const child of node.children)
+            if (!child.id || !levelHas(target.children, child.id, child)) target.children.push(child);
+        parent.splice(parent.indexOf(node), 1);
+    }
+    for (const node of kept) mergeDuplicates(node.children ?? []);
+}
+
+export function applyLayout(root: MenuNode[], layout: MenuLayout, mergeSubmenus = false): MenuNode[] {
     const map = index(root, "", new Map());
 
     for (const key of layout.hidden) {
@@ -245,6 +271,8 @@ export function applyLayout(root: MenuNode[], layout: MenuLayout): MenuNode[] {
             if (override.label) node.label = override.label;
         }
     }
+
+    if (mergeSubmenus) mergeDuplicates(root);
 
     const prune = (nodes: MenuNode[]) => {
         for (let i = nodes.length - 1; i >= 0; i--) {
@@ -412,13 +440,13 @@ export function record(navId: string, nodes: MenuNode[]) {
     notify();
 }
 
-export function transform(children: ReactNode, navId: string, layout: MenuLayout | undefined, extra: ReactNode): ReactNode {
+export function transform(children: ReactNode, navId: string, layout: MenuLayout | undefined, extra: ReactNode, mergeSubmenus: boolean): ReactNode {
     if (!navId || !Menu.MenuItem) return children;
     try {
         const nodes = parse(children);
         record(navId, nodes);
-        if (!layout) return extra ? [children, extra] : children;
-        const out = toElements(applyLayout(nodes, layout));
+        if (!layout && !mergeSubmenus) return extra ? [children, extra] : children;
+        const out = toElements(applyLayout(nodes, layout ?? emptyLayout(), mergeSubmenus));
         return extra ? [...out, extra] : out;
     } catch (e) {
         if (!failedMenus.has(navId)) {
