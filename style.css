@@ -38,9 +38,41 @@
     gap: 0.75em;
 }
 
+.vc-menu-customisation-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.vc-menu-customisation-block {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.vc-menu-customisation-section {
+    margin-top: 12px;
+}
+
+.vc-menu-customisation-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.vc-menu-customisation-inline {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
 .vc-menu-customisation-header {
     flex: 1;
     cursor: grab;
+}
+
+.vc-menu-customisation-header-fixed {
+    cursor: default;
 }
 
 .vc-menu-customisation-row {
@@ -85,6 +117,10 @@
 }
 
 .vc-menu-customisation-line {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
     padding: 0.5em 0.75em;
     border-radius: 8px;
     background: var(--background-secondary);

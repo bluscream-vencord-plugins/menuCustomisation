@@ -10,22 +10,19 @@ import { definePluginSettings } from "@api/Settings";
 import { Button } from "@components/Button";
 import ErrorBoundary from "@components/ErrorBoundary";
 import { ExpandableSection } from "@components/ExpandableCard";
-import { Flex } from "@components/Flex";
 import { Heading } from "@components/Heading";
-import { Margins } from "@components/margins";
 import { Paragraph } from "@components/Paragraph";
 import { Span } from "@components/Span";
 import { Switch } from "@components/Switch";
 import { classNameFactory } from "@utils/css";
-import { classes } from "@utils/misc";
 import { OptionType } from "@utils/types";
-import { lodash, Modal, openModal, React, Select, TextInput, useCallback, useEffect, useMemo, useRef, useState } from "@webpack/common";
+import { lodash, Modal, openModal, React, SearchableSelect, Select, TextInput, useCallback, useEffect, useMemo, useRef, useState } from "@webpack/common";
 
 import { ICONS, isImageUrl } from "./icons";
 import { PATTERNS } from "./patterns";
 import {
     applyLayout, displayPath, forgetRecording, getRecorded, isEmptyLayout, ItemOverride, keyMatches, logger, MenuLayout, MenuNode, Move,
-    normaliseLayout, overridableFields, RecordedNode, subscribeRecording
+    normaliseLayout, overridableFields, parentOf, RecordedNode, subscribeRecording
 } from "./transform";
 import { syncTray, trayHelpers } from "./tray";
 
@@ -272,6 +269,19 @@ function rowKeys(rows: Row[]) {
     });
 }
 
+function visibleRows(rows: Row[], query: string) {
+    const out = new Set<number>();
+    const ancestors = new Set<string>();
+    rows.forEach((row, i) => {
+        const { label, id, path } = row.node;
+        if (!path || ![label, id ?? "", displayPath(path)].some(text => text.toLowerCase().includes(query))) return;
+        out.add(i);
+        for (let p = row.container; p; p = parentOf(p)) ancestors.add(p);
+    });
+    rows.forEach((row, i) => row.node.path && ancestors.has(row.node.path) && out.add(i));
+    return out;
+}
+
 function LayoutEditor({ initialNavId }: { initialNavId?: string; }) {
     const layouts = settings.use(LAYOUT_KEYS).layouts ?? {};
     const recorded = useRecorded();
@@ -282,6 +292,7 @@ function LayoutEditor({ initialNavId }: { initialNavId?: string; }) {
     const [dragged, setDragged] = useState<number | null>(null);
     const [drop, setDrop] = useState<Drop | null>(null);
     const [newLabel, setNewLabel] = useState("");
+    const [filter, setFilter] = useState("");
 
     const stored = layouts[navId];
     const layout = useMemo(() => normaliseLayout(stored), [stored]);
@@ -298,6 +309,9 @@ function LayoutEditor({ initialNavId }: { initialNavId?: string; }) {
     };
     const keys = rowKeys(rows);
     const shown = new Set(rows.map(r => r.node.path));
+    const query = filter.trim().toLowerCase();
+    const filtering = query.length > 0;
+    const visible = filtering ? visibleRows(rows, query) : null;
     const targets = [
         { label: "Top level", value: "" },
         ...Object.entries(layout.submenus).map(([id, s]) => ({ label: `${s.label} (new)`, value: id })),
@@ -339,25 +353,29 @@ function LayoutEditor({ initialNavId }: { initialNavId?: string; }) {
     };
 
     return (
-        <section>
-            <Heading className={Margins.bottom8}>Menu Layouts</Heading>
-            <Paragraph className={Margins.bottom16}>
-                Pick a menu you've opened before, then hide, rename or move its items. Drag items to reorder them, or put them into a submenu.
-            </Paragraph>
-            <Select
-                className={Margins.bottom16}
+        <section className={cl("editor")}>
+            <div className={cl("block")}>
+                <Heading>Menu Layouts</Heading>
+                <Paragraph>
+                    Pick a menu you've opened before, then hide, rename or move its items. Drag items to reorder them, or put them into a submenu.
+                </Paragraph>
+            </div>
+            <SearchableSelect
                 options={navIds.map(id => ({ label: id, value: id }))}
-                isSelected={v => v === navId}
-                select={setNavId}
-                serialize={v => v}
+                value={navId}
+                onChange={(v: string) => { setNavId(v); setFilter(""); }}
+                closeOnSelect
             />
-            {navId === PATTERNS.trayNavId && <Paragraph className={Margins.bottom16}>
+            <TextInput value={filter} placeholder="Filter items by label or id" onChange={setFilter} />
+            {filtering && <Paragraph size="sm">Showing matching items and the submenus they're in. Clear the filter to drag items.</Paragraph>}
+            {navId === PATTERNS.trayNavId && <Paragraph>
                 Equibop's tray menu, through the NativeUtils plugin. Only hiding, renaming, moving and submenus work here. On Linux, submenus show as their items between separators.
                 If the tray doesn't change, restart Discord fully once: the tray hook only loads on startup.
             </Paragraph>}
 
-            <Flex flexDirection="column" gap="0.5em">
-                {rows.map((row, index) => (
+            <div className={cl("list")}>
+                {filtering && !visible?.size && <Paragraph size="sm">No items match.</Paragraph>}
+                {rows.map((row, index) => visible && !visible.has(index) ? null : (
                     <div
                         key={keys[index]}
                         className={cl("row", { "row-dragging": dragged === index, "row-group": row.groupStart })}
@@ -369,8 +387,8 @@ function LayoutEditor({ initialNavId }: { initialNavId?: string; }) {
                         {row.node.path
                             ? <ItemCard row={row} layout={layout} original={known.get(row.node.path)} targets={targets} save={save} moveTo={moveTo}>
                                 <div
-                                    className={cl("header")}
-                                    draggable
+                                    className={cl("header", { "header-fixed": filtering })}
+                                    draggable={!filtering}
                                     onDragStart={e => { setDragged(index); e.dataTransfer.setData("text/plain", String(index)); }}
                                     onDragEnd={() => { setDragged(null); setDrop(null); }}
                                 >
@@ -381,63 +399,65 @@ function LayoutEditor({ initialNavId }: { initialNavId?: string; }) {
                             : <Paragraph size="sm" className={cl("opaque")}>{row.node.label || row.node.type} (no id, can't be customised)</Paragraph>}
                     </div>
                 ))}
-            </Flex>
+            </div>
 
-            {layout.hidden.length > 0 && <>
-                <Heading className={classes(Margins.top20, Margins.bottom8)}>Hidden</Heading>
-                <Flex flexDirection="column" gap="0.5em">
+            {layout.hidden.length > 0 && <div className={cl("block", "section")}>
+                <Heading>Hidden</Heading>
+                <div className={cl("list")}>
                     {layout.hidden.map(key => (
-                        <Flex key={key} className={cl("line")} alignItems="center" justifyContent="space-between">
+                        <div key={key} className={cl("line")}>
                             <Paragraph size="md">{knownNodes.find(n => keyMatches(key, n))?.label ?? displayPath(key)}</Paragraph>
                             <Button size="small" onClick={() => save({ ...layout, hidden: layout.hidden.filter(k => k !== key) })}>Show</Button>
-                        </Flex>
+                        </div>
                     ))}
-                </Flex>
-            </>}
+                </div>
+            </div>}
 
-            <Heading className={classes(Margins.top20, Margins.bottom8)}>Submenus</Heading>
-            <Paragraph className={Margins.bottom8}>A new submenu shows up once you put an item into it.</Paragraph>
-            <Flex flexDirection="column" gap="0.5em">
-                {orphanSubmenus.map(([id, s]) => (
-                    <Flex key={id} className={cl("line")} alignItems="center" justifyContent="space-between">
-                        <Paragraph size="md">{s.label} (not shown, nothing seen is in it)</Paragraph>
-                        <Button size="small" variant="dangerPrimary" onClick={() => {
-                            const { [id]: _, ...submenus } = layout.submenus;
-                            save({ ...layout, submenus, moves: layout.moves.filter(m => m.into !== id && m.item !== id) });
-                        }}>Delete</Button>
-                    </Flex>
-                ))}
-                <Flex gap="0.5em" alignItems="center">
-                    <div className={cl("grow")}>
-                        <TextInput value={newLabel} placeholder="Jump to…" onChange={setNewLabel} />
+            <div className={cl("block", "section")}>
+                <Heading>Submenus</Heading>
+                <Paragraph>A new submenu shows up once you put an item into it.</Paragraph>
+                <div className={cl("list")}>
+                    {orphanSubmenus.map(([id, s]) => (
+                        <div key={id} className={cl("line")}>
+                            <Paragraph size="md">{s.label} (not shown, nothing seen is in it)</Paragraph>
+                            <Button size="small" variant="dangerPrimary" onClick={() => {
+                                const { [id]: _, ...submenus } = layout.submenus;
+                                save({ ...layout, submenus, moves: layout.moves.filter(m => m.into !== id && m.item !== id) });
+                            }}>Delete</Button>
+                        </div>
+                    ))}
+                    <div className={cl("inline")}>
+                        <div className={cl("grow")}>
+                            <TextInput value={newLabel} placeholder="Jump to…" onChange={setNewLabel} />
+                        </div>
+                        <Button disabled={!newLabel.trim()} onClick={() => {
+                            save({ ...layout, submenus: { ...layout.submenus, [PATTERNS.submenuPrefix + Date.now().toString(36)]: { label: newLabel.trim() } } });
+                            setNewLabel("");
+                        }}>Add Submenu</Button>
                     </div>
-                    <Button disabled={!newLabel.trim()} onClick={() => {
-                        save({ ...layout, submenus: { ...layout.submenus, [PATTERNS.submenuPrefix + Date.now().toString(36)]: { label: newLabel.trim() } } });
-                        setNewLabel("");
-                    }}>Add Submenu</Button>
-                </Flex>
-            </Flex>
+                </div>
+            </div>
 
-            {unseen.length > 0 && <>
-                <Heading className={classes(Margins.top20, Margins.bottom8)}>Rules for items not seen</Heading>
-                <Paragraph className={Margins.bottom8}>These items weren't in this menu the last times it opened. Their rules still apply when they show up.</Paragraph>
-                <Flex flexDirection="column" gap="0.5em">
+            {unseen.length > 0 && <div className={cl("block", "section")}>
+                <Heading>Rules for items not seen</Heading>
+                <Paragraph>These items weren't in this menu the last times it opened. Their rules still apply when they show up.</Paragraph>
+                <div className={cl("list")}>
                     {unseen.map(key => (
-                        <Flex key={key} className={cl("line", "unseen")} alignItems="center" justifyContent="space-between">
+                        <div key={key} className={cl("line", "unseen")}>
                             <Paragraph size="md">{displayPath(key)}</Paragraph>
                             <Button size="small" variant="dangerPrimary" onClick={() => removeKey(key)}>Remove Rules</Button>
-                        </Flex>
+                        </div>
                     ))}
-                </Flex>
-            </>}
+                </div>
+            </div>}
 
-            <Flex className={Margins.top20} gap="0.5em">
+            <div className={cl("inline", "section")}>
                 <Button variant="dangerPrimary" onClick={() => {
                     const { [navId]: _, ...rest } = layouts;
                     settings.store.layouts = lodash.cloneDeep(rest);
                 }}>Reset This Menu</Button>
                 <Button variant="secondary" onClick={() => forgetRecording(navId)}>Forget Seen Items</Button>
-            </Flex>
+            </div>
         </section>
     );
 }
