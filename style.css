@@ -1,0 +1,66 @@
+.vc-menu-customisation-grid {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.5em 1em;
+    align-items: center;
+}
+
+.vc-menu-customisation-header {
+    flex: 1;
+    cursor: grab;
+}
+
+.vc-menu-customisation-row {
+    position: relative;
+}
+
+.vc-menu-customisation-row-group {
+    margin-top: 0.75em;
+}
+
+.vc-menu-customisation-row-dragging {
+    opacity: 0.5;
+}
+
+.vc-menu-customisation-drop {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 2px;
+    border-radius: 1px;
+    background: var(--brand-500);
+    pointer-events: none;
+    z-index: 1;
+}
+
+.vc-menu-customisation-drop-before {
+    top: -3px;
+}
+
+.vc-menu-customisation-drop-after {
+    bottom: -3px;
+}
+
+.vc-menu-customisation-delete {
+    width: 100%;
+    margin-top: 0.75em;
+}
+
+.vc-menu-customisation-opaque,
+.vc-menu-customisation-unseen {
+    opacity: 0.6;
+}
+
+.vc-menu-customisation-line {
+    padding: 0.5em 0.75em;
+    border-radius: 8px;
+    background: var(--background-secondary);
+}
+
+.vc-menu-customisation-grow {
+    flex: 1;
+}
+
+.vc-menu-customisation-modal {
+    padding-bottom: 1em;
+}
