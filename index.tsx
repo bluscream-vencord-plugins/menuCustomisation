@@ -13,7 +13,7 @@ import { PATTERNS } from "./patterns";
 import { flushRecording, loadRecording, transform } from "./transform";
 
 function customiseItem(navId: string): ReactNode {
-    if (!settings.plain.customiseItem) return null;
+    if (!settings.store.customiseItem) return null;
     return (
         <Menu.MenuGroup key={PATTERNS.customiseItem}>
             <Menu.MenuItem id={PATTERNS.customiseItem} label={PATTERNS.customiseLabel} action={() => openEditor(navId)} />
