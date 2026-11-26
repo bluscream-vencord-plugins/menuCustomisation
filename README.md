@@ -24,6 +24,8 @@ Checkboxes and radio items only support label, subtext and disabled. Sliders and
 
 Rules match an item by its full path first (its submenu ids and its own id), then by its own id anywhere in the menu, so they keep working when an item moves between submenus. A rule key ending in `*` matches every id that starts with the rest, so a rule made on a wildcard item applies to all of them.
 
+With the optional [NativeUtils](https://github.com/bluscream-vencord-plugins/nativeUtils) plugin installed and enabled, Equibop's tray menu also gets a **Customise menus…** item that opens the editor. Without it, everything else works the same.
+
 ## Limits
 
 - Items without an id (separators, groups, some custom items) can't be customised.

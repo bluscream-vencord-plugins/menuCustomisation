@@ -38,5 +38,10 @@ export const PATTERNS = {
     /** Only images from https addresses are used as icons. */
     imageUrlProtocol: "https:",
     /** Colours Discord's menu items support (`color` prop). */
-    colors: ["default", "brand", "danger", "premium", "success"]
+    colors: ["default", "brand", "danger", "premium", "success"],
+    /** Optional plugin that adds items to the tray menu; looked up at runtime, never imported. */
+    nativeUtils: "NativeUtils",
+    trayOwner: "MenuCustomisation",
+    trayItem: { id: "customise", label: "Customise menus…" },
+    trayRetryDelayMs: 5000
 };

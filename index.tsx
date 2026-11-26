@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import { isPluginEnabled } from "@api/PluginManager";
+import { Logger } from "@utils/Logger";
+import { sleep } from "@utils/misc";
 import definePlugin from "@utils/types";
 import { lodash, Menu } from "@webpack/common";
 import type { ReactNode } from "react";
@@ -19,6 +22,39 @@ function customiseItem(navId: string): ReactNode {
             <Menu.MenuItem id={PATTERNS.customiseItem} label={PATTERNS.customiseLabel} action={() => openEditor(navId)} />
         </Menu.MenuGroup>
     );
+}
+
+const logger = new Logger("MenuCustomisation");
+let trayRunning = false;
+
+function nativeUtils() {
+    if (IS_WEB || !isPluginEnabled(PATTERNS.nativeUtils)) return undefined;
+    const helpers = VencordNative.pluginHelpers[PATTERNS.nativeUtils];
+    return helpers?.setTrayItems && helpers.waitTrayClick ? helpers : undefined;
+}
+
+async function trayLoop() {
+    let registered = false;
+    while (trayRunning) {
+        const native = nativeUtils();
+        if (!native) {
+            registered = false;
+            await sleep(PATTERNS.trayRetryDelayMs);
+            continue;
+        }
+        try {
+            if (!registered) registered = await native.setTrayItems(PATTERNS.trayOwner, [{ ...PATTERNS.trayItem, type: "normal" }]) === true;
+            const id = await native.waitTrayClick(PATTERNS.trayOwner);
+            if (trayRunning && id === PATTERNS.trayItem.id) {
+                VesktopNative?.win?.focus?.();
+                openEditor("");
+            }
+        } catch (e) {
+            logger.warn("Tray item failed", e);
+            registered = false;
+            await sleep(PATTERNS.trayRetryDelayMs);
+        }
+    }
 }
 
 export default definePlugin({
@@ -51,9 +87,13 @@ export default definePlugin({
         if (layouts && Object.values(layouts).some(l => "renames" in l))
             settings.store.layouts = lodash.cloneDeep(lodash.mapValues(layouts, normaliseLayout));
         loadRecording();
+        trayRunning = true;
+        trayLoop();
     },
 
     stop() {
+        trayRunning = false;
+        nativeUtils()?.setTrayItems(PATTERNS.trayOwner, []).catch(e => logger.warn("Clearing the tray item failed", e));
         stopRecording();
     }
 });
